@@ -90,9 +90,16 @@ def split_csv(
     def close_part(last_out_path):
         nonlocal out_file_handle, out_writer, wb, ws, part_idx
         if output_format == "csv":
-            if out_file_handle: out_file_handle.close()
+            if out_file_handle: 
+                out_file_handle.close()
+                out_file_handle = None
+            out_writer = None
         else:
-            if wb: wb.save(last_out_path)
+            if wb: 
+                wb.save(last_out_path)
+                wb.close()  # Fecha explicitamente o workbook
+                wb = None
+            ws = None
         part_idx += 1
 
     created_files = []
@@ -125,6 +132,7 @@ class CSVSplitterApp:
         self.root = root
         self.root.title("SheetManager - Splitter")
         self.root.geometry("600x550")
+        self.root.resizable(False, False)
         
         self.input_file = StringVar()
         self.output_dir = StringVar()
@@ -142,47 +150,51 @@ class CSVSplitterApp:
         f1 = Frame(root, bg="#ecf0f1", bd=2, relief="groove")
         f1.pack(padx=20, pady=10, fill="x")
         Label(f1, text="Arquivo CSV:", bg="#ecf0f1").grid(row=0, column=0, padx=5)
-        Entry(f1, textvariable=self.input_file, width=40).grid(row=0, column=1, padx=5)
-        Button(f1, text="Abrir", command=self.browse_input).grid(row=0, column=2, padx=5, pady=10)
+        Entry(f1, textvariable=self.input_file, width=40, state="readonly").grid(row=0, column=1, padx=5)
+        Button(f1, text="Abrir", command=self.browse_input, bg="#3498db", fg="white").grid(row=0, column=2, padx=5, pady=10)
         
         # Frame Output
         f2 = Frame(root, bg="#ecf0f1", bd=2, relief="groove")
         f2.pack(padx=20, pady=10, fill="x")
         Label(f2, text="Pasta Destino:", bg="#ecf0f1").grid(row=0, column=0, padx=5)
-        Entry(f2, textvariable=self.output_dir, width=40).grid(row=0, column=1, padx=5)
-        Button(f2, text="Pasta", command=self.browse_output).grid(row=0, column=2, padx=5, pady=10)
+        Entry(f2, textvariable=self.output_dir, width=40, state="readonly").grid(row=0, column=1, padx=5)
+        Button(f2, text="Pasta", command=self.browse_output, bg="#3498db", fg="white").grid(row=0, column=2, padx=5, pady=10)
         
         # Opções
         f3 = Frame(root, bg="#ecf0f1", bd=2, relief="groove")
         f3.pack(padx=20, pady=10, fill="x")
-        Radiobutton(f3, text="Qtd de Arquivos", variable=self.split_mode, value=1, bg="#ecf0f1").grid(row=0, column=0, sticky="w")
-        Entry(f3, textvariable=self.num_files).grid(row=0, column=1)
+        Radiobutton(f3, text="Qtd de Arquivos", variable=self.split_mode, value=1, bg="#ecf0f1").grid(row=0, column=0, sticky="w", padx=10)
+        Entry(f3, textvariable=self.num_files, width=15).grid(row=0, column=1, pady=5)
         
-        Radiobutton(f3, text="Linhas por Arquivo", variable=self.split_mode, value=2, bg="#ecf0f1").grid(row=1, column=0, sticky="w")
-        Entry(f3, textvariable=self.rows_per_file).grid(row=1, column=1)
+        Radiobutton(f3, text="Linhas por Arquivo", variable=self.split_mode, value=2, bg="#ecf0f1").grid(row=1, column=0, sticky="w", padx=10)
+        Entry(f3, textvariable=self.rows_per_file, width=15).grid(row=1, column=1, pady=5)
         
-        Label(f3, text="Formato Saída:", bg="#ecf0f1").grid(row=2, column=0)
-        ttk.Combobox(f3, textvariable=self.output_format, values=["csv", "xlsx"]).grid(row=2, column=1, pady=10)
+        Label(f3, text="Formato Saída:", bg="#ecf0f1").grid(row=2, column=0, sticky="w", padx=10)
+        ttk.Combobox(f3, textvariable=self.output_format, values=["csv", "xlsx"], state="readonly", width=13).grid(row=2, column=1, pady=10)
 
-        self.progress_label = Label(root, text="")
-        self.progress_label.pack()
+        self.progress_label = Label(root, text="", fg="#7f8c8d")
+        self.progress_label.pack(pady=5)
         
-        self.btn = Button(root, text="PROCESSAR", command=self.start, bg="#27ae60", fg="white", font=("Segoe UI", 12, "bold"), height=2, width=20)
+        self.btn = Button(root, text="PROCESSAR", command=self.start, bg="#27ae60", fg="white", font=("Segoe UI", 12, "bold"), height=2, width=20, cursor="hand2")
         self.btn.pack(pady=20)
 
     def browse_input(self):
-        f = filedialog.askopenfilename(filetypes=[("CSV files", "*.csv")])
+        f = filedialog.askopenfilename(
+            title="Selecione o arquivo CSV",
+            filetypes=[("CSV files", "*.csv"), ("Todos os arquivos", "*.*")]
+        )
         if f: self.input_file.set(f)
 
     def browse_output(self):
-        d = filedialog.askdirectory()
+        d = filedialog.askdirectory(title="Selecione a pasta de destino")
         if d: self.output_dir.set(d)
 
     def start(self):
         if not self.input_file.get() or not self.output_dir.get():
             return messagebox.showerror("Erro", "Selecione arquivo e pasta!")
         self.btn.config(state="disabled")
-        threading.Thread(target=self.run).start()
+        # Thread daemon=True garante que ela morra se a janela fechar
+        threading.Thread(target=self.run, daemon=True).start()
 
     def run(self):
         try:
@@ -198,16 +210,26 @@ class CSVSplitterApp:
             # Criar ZIP
             zip_path = Path(self.output_dir.get()) / "resultado_split.zip"
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for f in res: zipf.write(f, arcname=Path(f).name)
+                for f in res: 
+                    zipf.write(f, arcname=Path(f).name)
                 
-            messagebox.showinfo("Sucesso", f"Processado! ZIP criado em:\n{zip_path}")
+            messagebox.showinfo("Sucesso", f"✓ Processado com sucesso!\n\nZIP criado em:\n{zip_path}")
         except Exception as e:
-            messagebox.showerror("Erro", str(e))
+            messagebox.showerror("Erro", f"Ocorreu um erro:\n\n{str(e)}")
         finally:
             self.btn.config(state="normal")
             self.progress_label.config(text="")
 
+    def on_closing(self):
+        """Garante encerramento limpo do processo"""
+        self.root.destroy()
+        sys.exit(0)
+
 if __name__ == "__main__":
     root = Tk()
-    CSVSplitterApp(root)
+    app = CSVSplitterApp(root)
+    
+    # Garante que o processo morra ao fechar a janela
+    root.protocol("WM_DELETE_WINDOW", app.on_closing)
+    
     root.mainloop()
